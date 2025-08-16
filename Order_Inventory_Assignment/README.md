@@ -12,8 +12,154 @@ A comprehensive FastAPI-based microservice for managing products and orders in a
 ### ✅ Part B: Data Modeling & Validation
 - **Product Model**: id, sku (unique), name, price (>0), stock (≥0)
 - **Order Model**: id, product_id, quantity (>0), status (enum), created_at
-- **Constraints**: All validation implemented with Pydantic
-- **Indexes**: Applied on SKU, product_id, status, created_at for performance
+- **Constraints**: All validation implemented with Pydantic## 🌐 Deployment Configuration
+
+### Render.com Deployment (Recommended)
+
+**Option 1: Using render.yaml (Automated)**
+1. Connect your GitHub repository to Render.com
+2. Use the provided `render.yaml` configuration
+3. Render will automatically detect and deploy using the configuration
+
+**Option 2: Manual Web Service Setup**
+1. Create a new Web Service on Render.com
+2. Connect your GitHub repository
+3. Use these settings:
+   - **Build Command**: `pip install --upgrade pip && pip install -r requirements-production.txt`
+   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`
+   - **Python Version**: 3.9 or 3.10 (avoid 3.11+ for compatibility)
+
+### 🚨 Troubleshooting Render.com Deployment Errors
+
+#### Error: "maturin failed" / "Rust compilation error"
+
+**Cause**: Some Python packages (like `cryptography`, `locust`) require Rust compilation which can fail on Render.com's build environment.
+
+**Solution 1: Use Production Requirements**
+```bash
+# Use the minimal production requirements file
+pip install -r requirements-production.txt
+```
+
+**Solution 2: Alternative Dependency Versions**
+If you still get errors, try these older, more compatible versions in `requirements-production.txt`:
+```
+fastapi==0.100.0
+uvicorn==0.23.0
+pydantic==2.0.0
+sqlmodel==0.0.8
+```
+
+**Solution 3: Manual Web Service Setup**
+Instead of using render.yaml, manually configure on Render.com dashboard:
+
+1. **Build Command**: 
+   ```bash
+   pip install --upgrade pip && pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.0 sqlmodel==0.0.14
+   ```
+
+2. **Start Command**:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+3. **Environment Variables**:
+   - `WEBHOOK_SECRET`: `your-production-secret`
+   - `PYTHONPATH`: `/opt/render/project/src`
+
+#### Error: "Build failed" / "Import errors"
+
+**Check Build Logs**:
+1. Go to your Render.com dashboard
+2. Click on your service
+3. Check the "Events" tab for detailed build logs
+
+**Common Solutions**:
+```bash
+# 1. Clear build cache (in Render dashboard: Settings → Clear build cache)
+
+# 2. Use explicit Python version
+PYTHON_VERSION=3.9.18
+
+# 3. Upgrade pip first
+pip install --upgrade pip setuptools wheel
+
+# 4. Install dependencies one by one for debugging
+pip install fastapi
+pip install uvicorn
+pip install pydantic
+pip install sqlmodel
+```
+
+#### Error: "Application failed to start"
+
+**Check these settings**:
+1. **Port Configuration**: Ensure you use `--port $PORT` (Render provides this automatically)
+2. **Host Binding**: Must use `--host 0.0.0.0` (not 127.0.0.1)
+3. **Health Check**: Verify `/health` endpoint works locally first
+
+### Alternative Deployment Options
+
+#### Docker Deployment
+```dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+COPY requirements-production.txt .
+RUN pip install --no-cache-dir -r requirements-production.txt
+
+COPY app/ ./app/
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+#### Heroku Deployment
+```bash
+# Procfile
+web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+# runtime.txt
+python-3.9.18
+```
+
+### Environment Variables (Production)
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `PORT` | Server port (auto-provided by platform) | `8000` |
+| `WEBHOOK_SECRET` | HMAC secret for webhook verification | `prod-secret-123` |
+| `PYTHONPATH` | Python module path | `/opt/render/project/src` |
+
+### Deployment Checklist
+
+- [ ] ✅ Use `requirements-production.txt` (minimal dependencies)
+- [ ] ✅ Set `--host 0.0.0.0` (not localhost)
+- [ ] ✅ Use `$PORT` environment variable
+- [ ] ✅ Configure `WEBHOOK_SECRET` environment variable
+- [ ] ✅ Test `/health` endpoint after deployment
+- [ ] ✅ Verify API documentation at `/docs`
+- [ ] ✅ Test one complete flow (create product → create order)
+
+### Testing Deployed Service
+
+Once deployed, test your live service:
+
+```bash
+# Replace YOUR_RENDER_URL with your actual Render.com URL
+RENDER_URL="https://your-service-name.onrender.com"
+
+# Test health endpoint
+curl $RENDER_URL/health
+
+# Test API functionality
+curl -X POST "$RENDER_URL/products" \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"LIVE-001","name":"Live Test","price":99.99,"stock":10}'
+
+# Access live documentation
+open $RENDER_URL/docs
+```ied on SKU, product_id, status, created_at for performance
 
 ### ✅ Part C: Endpoints & Behavior
 - **Products**: Full CRUD with proper HTTP codes (201, 404, 409)
