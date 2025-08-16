@@ -60,7 +60,7 @@ But the actual structure is:
 | **Repository** | `your-github-repo` |
 | **Branch** | `main` |
 | **Root Directory** | `.` (or leave blank) |
-| **Build Command** | `pip install --upgrade pip && pip install -r requirements-ultra-compatible.txt` |
+| **Build Command** | `pip install --upgrade pip && pip install -r requirements-minimal.txt` |
 | **Start Command** | `python minimal_app.py` |
 | **Auto-Deploy** | `Yes` |
 
@@ -72,8 +72,8 @@ But the actual structure is:
 
 ```
 ==> Building...
-==> Running 'pip install --upgrade pip && pip install -r requirements-ultra-compatible.txt'
-Successfully installed fastapi-0.65.2 pydantic-1.8.1 uvicorn-0.13.4
+==> Running 'pip install --upgrade pip && pip install -r requirements-minimal.txt'
+Successfully installed fastapi-0.60.0 pydantic-1.7.4 uvicorn-0.12.3
 ==> Build successful 🎉
 ==> Deploying...
 ==> Running 'python minimal_app.py'
@@ -96,6 +96,11 @@ INFO:     Uvicorn running on http://0.0.0.0:10000 (Press CTRL+C to quit)
 1. `python minimal_app.py` ⭐ **ULTRA-COMPATIBLE** (works with any Python version)
 2. `python single_file_app_v2.py` (Python 3.11 compatible)
 3. `python single_file_app.py` (older version)
+
+### 🔄 Backup Build Commands (if dependency conflicts):
+1. `pip install --upgrade pip && pip install -r requirements-minimal.txt` ⭐ **RECOMMENDED**
+2. `pip install --upgrade pip && pip install -r requirements-ultra-compatible.txt`
+3. `pip install --upgrade pip && pip install -r requirements-fallback.txt`
 
 ## ✅ Success Verification
 
