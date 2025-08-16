@@ -1,9 +1,10 @@
 # Production-ready dependencies for Orders & Inventory Microservice
-# Tested compatible versions that work with minimal_app.py
+# Ultra-compatible versions for Render.com deployment
 
 fastapi==0.60.0
 pydantic==1.7.4
-uvicorn==0.12.3
+uvicorn==0.11.8
+starlette==0.13.4
 
 # Additional testing dependencies (optional)
 requests==2.31.0
