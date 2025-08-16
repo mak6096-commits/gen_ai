@@ -61,7 +61,7 @@ But the actual structure is:
 | **Branch** | `main` |
 | **Root Directory** | `.` (or leave blank) |
 | **Build Command** | `pip install --upgrade pip && pip install -r requirements-render.txt` |
-| **Start Command** | `uvicorn server:app --host 0.0.0.0 --port $PORT` |
+| **Start Command** | `python start_server.py` |
 | **Auto-Deploy** | `Yes` |
 
 ### Environment Variables:
@@ -75,7 +75,7 @@ But the actual structure is:
 ==> Running 'pip install --upgrade pip && pip install -r requirements-render.txt'
 ==> Build successful 🎉
 ==> Deploying...
-==> Running 'uvicorn server:app --host 0.0.0.0 --port $PORT'
+==> Running 'python start_server.py'
 INFO:     Started server process
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
@@ -91,7 +91,7 @@ INFO:     Uvicorn running on http://0.0.0.0:10000 (Press CTRL+C to quit)
 4. **TEST** each start command if previous fails
 
 ### 🔄 Backup Start Commands (try in order):
-1. `uvicorn server:app --host 0.0.0.0 --port $PORT` ⭐ **RECOMMENDED**
+1. `python start_server.py` ⭐ **RECOMMENDED** (bypasses all auto-detection)
 2. `python run_server.py` 
 3. `python single_file_app.py`
 
