@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: orders-inventory-service
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements-render.txt"
+    startCommand: "python single_file_app.py"
+    envVars:
+      - key: WEBHOOK_SECRET
+        value: "webhook-secret-key"
+      - key: PORT
+        fromService: true
