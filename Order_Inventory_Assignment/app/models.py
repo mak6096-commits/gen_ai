@@ -2,9 +2,8 @@ from typing import Optional, List
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, validator
-from sqlmodel import SQLModel, Field as SQLField, create_engine, Session, select
 
-
+# For older Pydantic compatibility, use simple in-memory storage instead of SQLModel
 class OrderStatus(str, Enum):
     PENDING = "PENDING"
     PAID = "PAID"
@@ -12,27 +11,45 @@ class OrderStatus(str, Enum):
     CANCELED = "CANCELED"
 
 
-# Database Models (SQLModel)
-class ProductBase(SQLModel):
-    sku: str = SQLField(unique=True, index=True)
-    name: str = SQLField(index=True)
-    price: float = SQLField(gt=0)  # price > 0
-    stock: int = SQLField(ge=0)    # stock >= 0
+# Simple data models for in-memory storage (compatible with Pydantic v1)
+class ProductBase(BaseModel):
+    sku: str
+    name: str
+    price: float = Field(..., gt=0)  # price > 0
+    stock: int = Field(..., ge=0)    # stock >= 0
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "sku": "LAPTOP-001",
+                "name": "MacBook Pro 16",
+                "price": 2499.99,
+                "stock": 25
+            }
+        }
 
 
-class Product(ProductBase, table=True):
-    id: Optional[int] = SQLField(default=None, primary_key=True)
+class Product(ProductBase):
+    id: int
 
 
-class OrderBase(SQLModel):
-    product_id: int = SQLField(foreign_key="product.id", index=True)
-    quantity: int = SQLField(gt=0)  # quantity > 0
-    status: OrderStatus = SQLField(default=OrderStatus.PENDING, index=True)
+class OrderBase(BaseModel):
+    product_id: int
+    quantity: int = Field(..., gt=0)  # quantity > 0
+    status: OrderStatus = OrderStatus.PENDING
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "product_id": 1,
+                "quantity": 2
+            }
+        }
 
 
-class Order(OrderBase, table=True):
-    id: Optional[int] = SQLField(default=None, primary_key=True)
-    created_at: datetime = SQLField(default_factory=datetime.utcnow, index=True)
+class Order(OrderBase):
+    id: int
+    created_at: datetime
 
 
 # API Request/Response Models
@@ -47,8 +64,8 @@ class ProductUpdate(BaseModel):
     stock: Optional[int] = Field(None, ge=0)
 
 
-class ProductResponse(ProductBase):
-    id: int
+class ProductResponse(Product):
+    pass
 
 
 class OrderCreate(OrderBase):
@@ -65,18 +82,21 @@ class OrderUpdate(BaseModel):
         return v
 
 
-class OrderResponse(OrderBase):
-    id: int
-    created_at: datetime
+class OrderResponse(Order):
+    pass
 
 
 # Webhook Models
 class PaymentWebhook(BaseModel):
     event_type: str
     order_id: int
-    payment_id: str
+    payment_id: str = "pay_123"
     amount: float
-    timestamp: datetime
+    timestamp: Optional[datetime] = None
+    
+    @validator('timestamp', pre=True, always=True)
+    def set_timestamp(cls, v):
+        return v or datetime.utcnow()
 
 
 class ErrorResponse(BaseModel):

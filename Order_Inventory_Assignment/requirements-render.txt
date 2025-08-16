@@ -1,0 +1,6 @@
+# Ultra-minimal requirements for Render.com - NO Rust compilation
+# These specific versions are guaranteed to work without native compilation
+
+fastapi==0.68.0
+uvicorn==0.15.0
+pydantic==1.10.2

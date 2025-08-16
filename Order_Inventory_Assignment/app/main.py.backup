@@ -1,0 +1,340 @@
+from fastapi import FastAPI, HTTPException, Request, Header
+from typing import List, Optional
+import os
+import hmac
+import hashlib
+import base64
+from datetime import datetime
+
+from app.models import (
+    Product, Order, ProductCreate, ProductUpdate, ProductResponse,
+    OrderCreate, OrderUpdate, OrderResponse, ErrorResponse, OrderStatus
+)
+
+# Simple in-memory storage (compatible with older dependencies)
+products_db = {}
+orders_db = {}
+product_counter = 0
+order_counter = 0
+
+# Create FastAPI app with metadata
+app = FastAPI(
+    title="Orders & Inventory Microservice",
+    version="1.0.0",
+    description="""
+    A FastAPI-based microservice for managing products and orders in an online store.
+    
+    ## Features
+    
+    * **Products**: Full CRUD operations with stock management
+    * **Orders**: Create and manage orders with automatic stock reduction
+    * **Webhooks**: Secure payment processing with HMAC verification
+    * **Validation**: Comprehensive input validation and error handling
+    
+    ## Authentication
+    
+    * Webhook endpoints require HMAC-SHA256 signature verification
+    * API endpoints are currently open (add API keys in production)
+    """,
+    contact={
+        "name": "API Support",
+        "email": "support@example.com",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+)
+
+# Simple CRUD operations
+def create_product(product_data: ProductCreate) -> Product:
+    global product_counter
+    
+    # Check for duplicate SKU
+    for existing_product in products_db.values():
+        if existing_product.sku == product_data.sku:
+            raise HTTPException(status_code=409, detail="Product with this SKU already exists")
+    
+    product_counter += 1
+    product = Product(id=product_counter, **product_data.dict())
+    products_db[product_counter] = product
+    return product
+
+def get_product(product_id: int) -> Product:
+    if product_id not in products_db:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return products_db[product_id]
+
+def create_order(order_data: OrderCreate) -> Order:
+    global order_counter
+    
+    # Check if product exists and has sufficient stock
+    if order_data.product_id not in products_db:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product = products_db[order_data.product_id]
+    if product.stock < order_data.quantity:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Insufficient stock. Available: {product.stock}, Requested: {order_data.quantity}"
+        )
+    
+    # Reduce stock
+    product.stock -= order_data.quantity
+    
+    # Create order
+    order_counter += 1
+    order = Order(
+        id=order_counter,
+        product_id=order_data.product_id,
+        quantity=order_data.quantity,
+        status=OrderStatus.PENDING,
+        created_at=datetime.utcnow()
+    )
+    orders_db[order_counter] = order
+    return order
+
+# Webhook security
+def verify_webhook_signature(signature: str, payload: bytes, secret: str) -> bool:
+    """Verify HMAC-SHA256 signature"""
+    if not signature.startswith('sha256='):
+        return False
+    
+    expected_signature = hmac.new(
+        secret.encode(),
+        payload,
+        hashlib.sha256
+    ).digest()
+    expected_signature_b64 = base64.b64encode(expected_signature).decode()
+    
+    provided_signature = signature[7:]  # Remove 'sha256=' prefix
+    return hmac.compare_digest(expected_signature_b64, provided_signature)
+
+
+# Root endpoint
+@app.get("/", tags=["General"])
+async def root():
+    """Welcome message and API information"""
+    return {
+        "message": "Orders & Inventory Microservice",
+        "version": "1.0.0",
+        "documentation": "/docs",
+        "health_check": "/health"
+    }
+
+
+@app.get("/health", tags=["General"])
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "orders-inventory"}
+
+
+# Product endpoints
+@app.post(
+    "/products", 
+    response_model=ProductResponse, 
+    status_code=201,
+    tags=["Products"],
+    summary="Create a new product",
+    description="Create a new product with unique SKU. Returns 409 if SKU already exists."
+)
+async def create_product(product: ProductCreate):
+    """
+    Create a new product with the following validations:
+    
+    - **SKU**: Must be unique across all products
+    - **Price**: Must be greater than 0
+    - **Stock**: Must be greater than or equal to 0
+    """
+    return ProductCRUD.create_product(product)
+
+
+@app.get(
+    "/products", 
+    response_model=List[ProductResponse], 
+    tags=["Products"],
+    summary="List all products",
+    description="Get a list of all products. No pagination implemented for simplicity."
+)
+async def get_products():
+    """Get all products. In production, this would include pagination."""
+    return ProductCRUD.get_products()
+
+
+@app.get(
+    "/products/{product_id}", 
+    response_model=ProductResponse, 
+    tags=["Products"],
+    summary="Get product by ID",
+    description="Retrieve a specific product by its ID. Returns 404 if not found."
+)
+async def get_product(product_id: int):
+    """Get a specific product by ID"""
+    return ProductCRUD.get_product(product_id)
+
+
+@app.put(
+    "/products/{product_id}", 
+    response_model=ProductResponse, 
+    tags=["Products"],
+    summary="Update product",
+    description="Update product fields. Supports partial updates using exclude_unset=True."
+)
+async def update_product(product_id: int, product: ProductUpdate):
+    """
+    Update a product. Only provided fields will be updated.
+    
+    - **SKU**: Must remain unique if changed
+    - **Price**: Must be greater than 0 if provided
+    - **Stock**: Must be greater than or equal to 0 if provided
+    """
+    return ProductCRUD.update_product(product_id, product)
+
+
+@app.delete(
+    "/products/{product_id}", 
+    status_code=204,
+    tags=["Products"],
+    summary="Delete product",
+    description="Delete a product. Cannot delete if there are pending or paid orders."
+)
+async def delete_product(product_id: int):
+    """Delete a product. Returns 204 on success."""
+    ProductCRUD.delete_product(product_id)
+    return None
+
+
+# Order endpoints
+@app.post(
+    "/orders", 
+    response_model=OrderResponse, 
+    status_code=201,
+    tags=["Orders"],
+    summary="Create a new order",
+    description="Create an order and atomically reduce product stock. Returns 409 if insufficient stock."
+)
+async def create_order(order: OrderCreate):
+    """
+    Create a new order with automatic stock reduction.
+    
+    - **product_id**: Must reference an existing product
+    - **quantity**: Must be greater than 0 and not exceed available stock
+    - **status**: Automatically set to PENDING
+    """
+    return OrderCRUD.create_order(order)
+
+
+@app.get(
+    "/orders", 
+    response_model=List[OrderResponse], 
+    tags=["Orders"],
+    summary="List all orders"
+)
+async def get_orders():
+    """Get all orders"""
+    return OrderCRUD.get_orders()
+
+
+@app.get(
+    "/orders/{order_id}", 
+    response_model=OrderResponse, 
+    tags=["Orders"],
+    summary="Get order by ID",
+    description="Retrieve order details for tracking purposes."
+)
+async def get_order(order_id: int):
+    """Get order details including current status and creation time"""
+    return OrderCRUD.get_order(order_id)
+
+
+@app.put(
+    "/orders/{order_id}", 
+    response_model=OrderResponse, 
+    tags=["Orders"],
+    summary="Update order status",
+    description="Update order status with validation of state transitions."
+)
+async def update_order(order_id: int, order: OrderUpdate):
+    """
+    Update order status with the following rules:
+    
+    - **PENDING** → PAID, CANCELED
+    - **PAID** → SHIPPED, CANCELED
+    - **SHIPPED** → (final state)
+    - **CANCELED** → (final state)
+    """
+    return OrderCRUD.update_order(order_id, order)
+
+
+@app.delete(
+    "/orders/{order_id}", 
+    status_code=204,
+    tags=["Orders"],
+    summary="Cancel/Delete order",
+    description="Cancel order and restore stock, or delete if already canceled."
+)
+async def cancel_order(order_id: int):
+    """
+    Cancel an order and restore stock to the product.
+    If order is already canceled, this will delete it permanently.
+    """
+    order = OrderCRUD.get_order(order_id)
+    
+    if order.status == OrderStatus.CANCELED:
+        # Delete if already canceled
+        OrderCRUD.delete_order(order_id)
+    else:
+        # Cancel and restore stock
+        OrderCRUD.cancel_order(order_id)
+    
+    return None
+
+
+# Webhook endpoints
+@app.post(
+    "/webhooks/payment",
+    tags=["Webhooks"],
+    summary="Payment webhook",
+    description="Secure webhook endpoint for payment processing with HMAC verification."
+)
+async def payment_webhook(
+    request: Request,
+    x_webhook_signature: Optional[str] = Header(None, description="HMAC-SHA256 signature of the request body")
+):
+    """
+    Process payment webhooks with HMAC-SHA256 signature verification.
+    
+    **Security Features:**
+    - HMAC signature verification using X-Webhook-Signature header
+    - Replay attack protection
+    - Validates order state before updating
+    
+    **Expected payload for payment.succeeded:**
+    ```json
+    {
+        "event_type": "payment.succeeded",
+        "order_id": 123,
+        "payment_id": "pay_123",
+        "amount": 99.99,
+        "timestamp": "2024-01-01T12:00:00Z"
+    }
+    ```
+    """
+    return await webhook_handler.process_payment_webhook(request, x_webhook_signature)
+
+
+# Error handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Consistent error response format"""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

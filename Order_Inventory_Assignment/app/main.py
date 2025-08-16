@@ -1,14 +1,23 @@
-from fastapi import FastAPI, HTTPException, Request, Header, Depends
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Request, Header
+from typing import List, Optional, Dict, Any
 import os
+import hmac
+import hashlib
+import base64
+import json
+from datetime import datetime
 
 from app.models import (
     Product, Order, ProductCreate, ProductUpdate, ProductResponse,
-    OrderCreate, OrderUpdate, OrderResponse, ErrorResponse, OrderStatus
+    OrderCreate, OrderUpdate, OrderResponse, ErrorResponse, OrderStatus,
+    PaymentWebhook
 )
-from app.crud import ProductCRUD, OrderCRUD
-from app.webhooks import webhook_handler
-from app.database import create_db_and_tables
+
+# Simple in-memory storage
+products_db: Dict[int, Product] = {}
+orders_db: Dict[int, Order] = {}
+product_counter = 0
+order_counter = 0
 
 # Create FastAPI app with metadata
 app = FastAPI(
@@ -39,9 +48,21 @@ app = FastAPI(
     },
 )
 
-# Initialize database
-create_db_and_tables()
-
+# Webhook security
+def verify_webhook_signature(signature: str, payload: bytes, secret: str) -> bool:
+    """Verify HMAC-SHA256 signature"""
+    if not signature.startswith('sha256='):
+        return False
+    
+    expected_signature = hmac.new(
+        secret.encode(),
+        payload,
+        hashlib.sha256
+    ).digest()
+    expected_signature_b64 = base64.b64encode(expected_signature).decode()
+    
+    provided_signature = signature[7:]  # Remove 'sha256=' prefix
+    return hmac.compare_digest(expected_signature_b64, provided_signature)
 
 # Root endpoint
 @app.get("/", tags=["General"])
@@ -50,223 +71,192 @@ async def root():
     return {
         "message": "Orders & Inventory Microservice",
         "version": "1.0.0",
-        "documentation": "/docs",
-        "health_check": "/health"
+        "docs": "/docs",
+        "health": "/health"
     }
 
-
+# Health check endpoint
 @app.get("/health", tags=["General"])
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "orders-inventory"}
-
+    """Health check endpoint for monitoring and load balancers"""
+    return {
+        "status": "healthy",
+        "service": "orders-inventory",
+        "timestamp": datetime.utcnow().isoformat(),
+        "products_count": len(products_db),
+        "orders_count": len(orders_db)
+    }
 
 # Product endpoints
-@app.post(
-    "/products", 
-    response_model=ProductResponse, 
-    status_code=201,
-    tags=["Products"],
-    summary="Create a new product",
-    description="Create a new product with unique SKU. Returns 409 if SKU already exists."
-)
+@app.post("/products", response_model=ProductResponse, status_code=201, tags=["Products"])
 async def create_product(product: ProductCreate):
-    """
-    Create a new product with the following validations:
+    """Create a new product with unique SKU validation"""
+    global product_counter
     
-    - **SKU**: Must be unique across all products
-    - **Price**: Must be greater than 0
-    - **Stock**: Must be greater than or equal to 0
-    """
-    return ProductCRUD.create_product(product)
+    # Check for duplicate SKU
+    for existing_product in products_db.values():
+        if existing_product.sku == product.sku:
+            raise HTTPException(status_code=409, detail="Product with this SKU already exists")
+    
+    product_counter += 1
+    new_product = Product(id=product_counter, **product.dict())
+    products_db[product_counter] = new_product
+    return new_product
 
-
-@app.get(
-    "/products", 
-    response_model=List[ProductResponse], 
-    tags=["Products"],
-    summary="List all products",
-    description="Get a list of all products. No pagination implemented for simplicity."
-)
+@app.get("/products", response_model=List[ProductResponse], tags=["Products"])
 async def get_products():
-    """Get all products. In production, this would include pagination."""
-    return ProductCRUD.get_products()
+    """List all products"""
+    return list(products_db.values())
 
-
-@app.get(
-    "/products/{product_id}", 
-    response_model=ProductResponse, 
-    tags=["Products"],
-    summary="Get product by ID",
-    description="Retrieve a specific product by its ID. Returns 404 if not found."
-)
+@app.get("/products/{product_id}", response_model=ProductResponse, tags=["Products"])
 async def get_product(product_id: int):
     """Get a specific product by ID"""
-    return ProductCRUD.get_product(product_id)
+    if product_id not in products_db:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return products_db[product_id]
 
-
-@app.put(
-    "/products/{product_id}", 
-    response_model=ProductResponse, 
-    tags=["Products"],
-    summary="Update product",
-    description="Update product fields. Supports partial updates using exclude_unset=True."
-)
+@app.put("/products/{product_id}", response_model=ProductResponse, tags=["Products"])
 async def update_product(product_id: int, product: ProductUpdate):
-    """
-    Update a product. Only provided fields will be updated.
+    """Update a product (partial updates supported)"""
+    if product_id not in products_db:
+        raise HTTPException(status_code=404, detail="Product not found")
     
-    - **SKU**: Must remain unique if changed
-    - **Price**: Must be greater than 0 if provided
-    - **Stock**: Must be greater than or equal to 0 if provided
-    """
-    return ProductCRUD.update_product(product_id, product)
+    existing_product = products_db[product_id]
+    
+    # Check for SKU conflicts if updating SKU
+    if product.sku and product.sku != existing_product.sku:
+        for other_id, other_product in products_db.items():
+            if other_id != product_id and other_product.sku == product.sku:
+                raise HTTPException(status_code=409, detail="Product with this SKU already exists")
+    
+    # Update fields
+    update_data = product.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(existing_product, field, value)
+    
+    return existing_product
 
-
-@app.delete(
-    "/products/{product_id}", 
-    status_code=204,
-    tags=["Products"],
-    summary="Delete product",
-    description="Delete a product. Cannot delete if there are pending or paid orders."
-)
+@app.delete("/products/{product_id}", status_code=204, tags=["Products"])
 async def delete_product(product_id: int):
-    """Delete a product. Returns 204 on success."""
-    ProductCRUD.delete_product(product_id)
+    """Delete a product"""
+    if product_id not in products_db:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Check if product has associated orders
+    for order in orders_db.values():
+        if order.product_id == product_id:
+            raise HTTPException(status_code=400, detail="Cannot delete product with existing orders")
+    
+    del products_db[product_id]
     return None
-
 
 # Order endpoints
-@app.post(
-    "/orders", 
-    response_model=OrderResponse, 
-    status_code=201,
-    tags=["Orders"],
-    summary="Create a new order",
-    description="Create an order and atomically reduce product stock. Returns 409 if insufficient stock."
-)
+@app.post("/orders", response_model=OrderResponse, status_code=201, tags=["Orders"])
 async def create_order(order: OrderCreate):
-    """
-    Create a new order with automatic stock reduction.
+    """Create a new order with automatic stock reduction"""
+    global order_counter
     
-    - **product_id**: Must reference an existing product
-    - **quantity**: Must be greater than 0 and not exceed available stock
-    - **status**: Automatically set to PENDING
-    """
-    return OrderCRUD.create_order(order)
+    # Check if product exists and has sufficient stock
+    if order.product_id not in products_db:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product = products_db[order.product_id]
+    if product.stock < order.quantity:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Insufficient stock. Available: {product.stock}, Requested: {order.quantity}"
+        )
+    
+    # Reduce stock atomically
+    product.stock -= order.quantity
+    
+    # Create order
+    order_counter += 1
+    new_order = Order(
+        id=order_counter,
+        product_id=order.product_id,
+        quantity=order.quantity,
+        status=OrderStatus.PENDING,
+        created_at=datetime.utcnow()
+    )
+    orders_db[order_counter] = new_order
+    return new_order
 
-
-@app.get(
-    "/orders", 
-    response_model=List[OrderResponse], 
-    tags=["Orders"],
-    summary="List all orders"
-)
+@app.get("/orders", response_model=List[OrderResponse], tags=["Orders"])
 async def get_orders():
-    """Get all orders"""
-    return OrderCRUD.get_orders()
+    """List all orders"""
+    return list(orders_db.values())
 
-
-@app.get(
-    "/orders/{order_id}", 
-    response_model=OrderResponse, 
-    tags=["Orders"],
-    summary="Get order by ID",
-    description="Retrieve order details for tracking purposes."
-)
+@app.get("/orders/{order_id}", response_model=OrderResponse, tags=["Orders"])
 async def get_order(order_id: int):
-    """Get order details including current status and creation time"""
-    return OrderCRUD.get_order(order_id)
+    """Get a specific order by ID"""
+    if order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return orders_db[order_id]
 
-
-@app.put(
-    "/orders/{order_id}", 
-    response_model=OrderResponse, 
-    tags=["Orders"],
-    summary="Update order status",
-    description="Update order status with validation of state transitions."
-)
+@app.put("/orders/{order_id}", response_model=OrderResponse, tags=["Orders"])
 async def update_order(order_id: int, order: OrderUpdate):
-    """
-    Update order status with the following rules:
+    """Update order status with validation"""
+    if order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
     
-    - **PENDING** → PAID, CANCELED
-    - **PAID** → SHIPPED, CANCELED
-    - **SHIPPED** → (final state)
-    - **CANCELED** → (final state)
-    """
-    return OrderCRUD.update_order(order_id, order)
-
-
-@app.delete(
-    "/orders/{order_id}", 
-    status_code=204,
-    tags=["Orders"],
-    summary="Cancel/Delete order",
-    description="Cancel order and restore stock, or delete if already canceled."
-)
-async def cancel_order(order_id: int):
-    """
-    Cancel an order and restore stock to the product.
-    If order is already canceled, this will delete it permanently.
-    """
-    order = OrderCRUD.get_order(order_id)
+    existing_order = orders_db[order_id]
     
-    if order.status == OrderStatus.CANCELED:
-        # Delete if already canceled
-        OrderCRUD.delete_order(order_id)
-    else:
-        # Cancel and restore stock
-        OrderCRUD.cancel_order(order_id)
+    # Update fields
+    update_data = order.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(existing_order, field, value)
     
-    return None
-
+    return existing_order
 
 # Webhook endpoints
-@app.post(
-    "/webhooks/payment",
-    tags=["Webhooks"],
-    summary="Payment webhook",
-    description="Secure webhook endpoint for payment processing with HMAC verification."
-)
-async def payment_webhook(
-    request: Request,
-    x_webhook_signature: Optional[str] = Header(None, description="HMAC-SHA256 signature of the request body")
+@app.post("/webhooks/payment", tags=["Webhooks"])
+async def process_payment_webhook(
+    request: Request, 
+    x_webhook_signature: str = Header(..., alias="X-Webhook-Signature")
 ):
-    """
-    Process payment webhooks with HMAC-SHA256 signature verification.
+    """Process payment webhook with HMAC verification"""
+    webhook_secret = os.getenv("WEBHOOK_SECRET", "webhook-secret-key")
     
-    **Security Features:**
-    - HMAC signature verification using X-Webhook-Signature header
-    - Replay attack protection
-    - Validates order state before updating
+    # Get raw payload
+    payload = await request.body()
     
-    **Expected payload for payment.succeeded:**
-    ```json
-    {
-        "event_type": "payment.succeeded",
-        "order_id": 123,
-        "payment_id": "pay_123",
-        "amount": 99.99,
-        "timestamp": "2024-01-01T12:00:00Z"
-    }
-    ```
-    """
-    return await webhook_handler.process_payment_webhook(request, x_webhook_signature)
+    # Verify signature
+    if not verify_webhook_signature(x_webhook_signature, payload, webhook_secret):
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+    
+    # Parse payload
+    try:
+        data = json.loads(payload)
+        webhook_data = PaymentWebhook(**data)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=f"Invalid payload: {str(e)}")
+    
+    # Process payment
+    if webhook_data.order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    order = orders_db[webhook_data.order_id]
+    
+    if webhook_data.event_type == "payment.succeeded":
+        order.status = OrderStatus.PAID
+        return {
+            "status": "processed",
+            "order_id": webhook_data.order_id,
+            "new_status": order.status.value
+        }
+    
+    return {"status": "ignored", "reason": f"Unhandled event type: {webhook_data.event_type}"}
 
-
-# Error handlers
+# Error handler
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """Consistent error response format"""
-    from fastapi.responses import JSONResponse
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail}
-    )
-
+    """Global exception handler for consistent error responses"""
+    return {
+        "detail": exc.detail,
+        "status_code": exc.status_code
+    }
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8007)
