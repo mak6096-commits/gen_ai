@@ -12,8 +12,8 @@ import hashlib
 from datetime import datetime
 
 # Configuration
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your-webhook-secret-key")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8007")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "webhook-secret-key")
 
 def test_api():
     """Run comprehensive smoke tests"""

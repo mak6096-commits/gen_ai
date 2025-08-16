@@ -1,4 +1,0 @@
-# Tested compatible versions that work together
-fastapi==0.63.0
-pydantic==1.8.2
-uvicorn==0.13.4

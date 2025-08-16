@@ -1,0 +1,29 @@
+# Google Cloud Build configuration
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/orders-inventory-api', '.']
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/orders-inventory-api']
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'orders-inventory-api'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/orders-inventory-api'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--port'
+      - '8007'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'WEBHOOK_SECRET=production-webhook-secret-key-change-me'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
