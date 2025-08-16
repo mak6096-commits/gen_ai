@@ -60,8 +60,8 @@ But the actual structure is:
 | **Repository** | `your-github-repo` |
 | **Branch** | `main` |
 | **Root Directory** | `.` (or leave blank) |
-| **Build Command** | `pip install --upgrade pip && pip install -r requirements-render.txt` |
-| **Start Command** | `python start_server.py` |
+| **Build Command** | `pip install --upgrade pip && pip install -r requirements-python311.txt` |
+| **Start Command** | `python single_file_app_v2.py` |
 | **Auto-Deploy** | `Yes` |
 
 ### Environment Variables:
@@ -72,10 +72,12 @@ But the actual structure is:
 
 ```
 ==> Building...
-==> Running 'pip install --upgrade pip && pip install -r requirements-render.txt'
+==> Running 'pip install --upgrade pip && pip install -r requirements-python311.txt'
+Successfully installed fastapi-0.68.0 pydantic-1.8.2 uvicorn-0.15.0
 ==> Build successful 🎉
 ==> Deploying...
-==> Running 'python start_server.py'
+==> Running 'python single_file_app_v2.py'
+🚀 Starting single-file FastAPI server on 0.0.0.0:10000
 INFO:     Started server process
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
@@ -91,9 +93,9 @@ INFO:     Uvicorn running on http://0.0.0.0:10000 (Press CTRL+C to quit)
 4. **TEST** each start command if previous fails
 
 ### 🔄 Backup Start Commands (try in order):
-1. `python start_server.py` ⭐ **RECOMMENDED** (bypasses all auto-detection)
-2. `python run_server.py` 
-3. `python single_file_app.py`
+1. `python single_file_app_v2.py` ⭐ **PYTHON 3.11 COMPATIBLE**
+2. `python single_file_app.py` 
+3. `python start_server.py`
 
 ## ✅ Success Verification
 

@@ -1,11 +1,8 @@
-#!/usr/bin/env pyttry:
-    from fastapi import FastAPI, HTTPException, Request, Header
-    from pydantic import BaseModel
-    from enum import Enum
-    import uvicorn
-except ImportError as e:""
+#!/usr/bin/env python3
+"""
 Single-file FastAPI server for Render.com deployment
 This avoids all module path issues by being completely self-contained
+Compatible with Python 3.11 and older Pydantic versions
 """
 
 import os
@@ -22,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from fastapi import FastAPI, HTTPException, Request, Header
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel
     from enum import Enum
     import uvicorn
 except ImportError as e:
@@ -122,6 +119,13 @@ async def health_check():
 @app.post("/products", status_code=201)
 async def create_product(product: ProductCreate):
     global product_counter
+    
+    # Basic validation
+    if product.price <= 0:
+        raise HTTPException(status_code=422, detail="Price must be greater than 0")
+    if product.stock < 0:
+        raise HTTPException(status_code=422, detail="Stock cannot be negative")
+    
     for existing_product in products_db.values():
         if existing_product.sku == product.sku:
             raise HTTPException(status_code=409, detail="Product with this SKU already exists")
@@ -144,6 +148,11 @@ async def get_product(product_id: int):
 @app.post("/orders", status_code=201)
 async def create_order(order: OrderCreate):
     global order_counter
+    
+    # Basic validation
+    if order.quantity <= 0:
+        raise HTTPException(status_code=422, detail="Quantity must be greater than 0")
+    
     if order.product_id not in products_db:
         raise HTTPException(status_code=404, detail="Product not found")
     

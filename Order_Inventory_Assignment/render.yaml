@@ -3,12 +3,12 @@ services:
   - type: web
     name: orders-inventory-api
     runtime: python
-    region: oregon
     plan: free
-    branch: main
-    buildCommand: pip install --upgrade pip && pip install -r requirements-render.txt
-    startCommand: python start_server.py
+    buildCommand: pip install --upgrade pip && pip install -r requirements-python311.txt
+    startCommand: python single_file_app_v2.py
     healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
       - key: WEBHOOK_SECRET
         value: production-webhook-secret-key-change-me

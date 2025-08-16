@@ -1,0 +1,4 @@
+# Ultra-minimal requirements for Python 3.11 compatibility
+fastapi==0.68.0
+pydantic==1.8.2
+uvicorn==0.15.0
