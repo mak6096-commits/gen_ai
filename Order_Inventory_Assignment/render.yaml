@@ -4,11 +4,9 @@ services:
     name: orders-inventory-api
     runtime: python
     plan: free
-    buildCommand: pip install --upgrade pip && pip install -r requirements-python311.txt
-    startCommand: python single_file_app_v2.py
+    buildCommand: pip install --upgrade pip && pip install -r requirements-ultra-compatible.txt
+    startCommand: python minimal_app.py
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11"
       - key: WEBHOOK_SECRET
         value: production-webhook-secret-key-change-me
